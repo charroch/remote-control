@@ -22,5 +22,5 @@ class AndroidParserTest extends Specification {
       "accept the string 'install on all' " ! e1 ^
       end
 
-  def e1 = AndroidParser.parse("""install on all""").successful should beTrue
+  def e1 = AndroidParser.parse("""install "test.apk" on all""").successful should beTrue
 }

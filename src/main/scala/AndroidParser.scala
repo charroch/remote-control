@@ -2,6 +2,8 @@ package android.parser
 
 import util.parsing.combinator.syntactical.StandardTokenParsers
 import java.io.File
+import com.android.ddmlib.AndroidDebugBridge.IDeviceChangeListener
+import com.android.ddmlib.{IShellOutputReceiver, IDevice, AndroidDebugBridge}
 
 object AndroidParser extends StandardTokenParsers {
   lexical.reserved +=
@@ -10,21 +12,29 @@ object AndroidParser extends StandardTokenParsers {
   lexical.delimiters +=("(", ")", ",")
 
   lazy val actions: Parser[SP] =
-    verbs ~ devices ^^ {
-      case v ~ d => new SP(v, d)
+    install ~ devices ^^ {
+      case v ~ d => {
+        new SP(v, d)
+      }
     }
 
   lazy val verbs: Parser[Command] =
-    ("install" | "run" | "instrument" | "uninstall") ^^ {
-      case "install" => Install
+    (install | "run" | "instrument" | "uninstall") ^^ {
       case "run" => run
       case "instrument" => instrument
       case "uninstall" => uninstall
     }
 
-  lazy val devices: Parser[Seq[String]] =
+  lazy val install: Parser[Command] =
+    "install" ~> stringLit ^^ {
+      case apkLocation => new Install(new File(apkLocation))
+    }
+
+  lazy val devices: Parser[Seq[IDevice]] =
     "on" ~> ("all" | "emulators" | "devices") ^^ {
-      case "all" => List("hello", "Something else")
+      case "all" => {
+        DeviceManager().bridge.getDevices
+      }
     }
 
   def parse(s: String) = {
@@ -33,15 +43,25 @@ object AndroidParser extends StandardTokenParsers {
   }
 }
 
-class SP(i: Command, d: Seq[String]) {
+class SP(i: Command, d: Seq[IDevice]) {
+
+
+  def execute {
+
+    i match {
+      case Install(apk, reinstall) => {
+        println("installing on " + d)
+        d.foreach(_.installPackage(apk.getAbsolutePath, reinstall))
+      }
+    }
+  }
+
   override def toString = "Command " + i + " and s " + d
 }
 
 trait Command
 
-case class I(apk: File, reinstall: Boolean = true) extends Command
-
-case object Install extends Command
+case class Install(apk: File, reinstall: Boolean = true) extends Command
 
 case object run extends Command
 
@@ -52,13 +72,66 @@ case object uninstall extends Command
 case object broadcast extends Command
 
 
-class Device {
+class Device(d: IDevice) {
+  implicit def toRichDevice(d: IDevice) = new Device(d)
+
+  def isRooted: Boolean = {
+    import sys.process._
+
+    d.executeShellCommand("which su", new IShellOutputReceiver{
+      def addOutput(p1: Array[Byte], p2: Int, p3: Int) {}
+
+      def flush() {}
+
+      def isCancelled = false
+    })
+    true
+
+  }
 }
 
 class DeviceStore {
 }
 
-class DeviceManager {
+class DeviceManager(adb: String) {
+  lazy val bridge: AndroidDebugBridge = {
+    AndroidDebugBridge.init(false)
+    AndroidDebugBridge.createBridge(adb, true)
+  }
+
+  def register {
+    AndroidDebugBridge.addDebugBridgeChangeListener(new AndroidDebugBridge.IDebugBridgeChangeListener {
+      def bridgeChanged(b: AndroidDebugBridge) {
+
+      }
+    })
+
+    AndroidDebugBridge.addDeviceChangeListener(new IDeviceChangeListener() {
+      def deviceConnected(p1: IDevice) {}
+
+      def deviceDisconnected(p1: IDevice) {}
+
+      def deviceChanged(p1: IDevice, p2: Int) {}
+    })
+
+    AndroidDebugBridge.addDebugBridgeChangeListener(new AndroidDebugBridge.IDebugBridgeChangeListener {
+      def bridgeChanged(b: AndroidDebugBridge) {
+
+      }
+    })
+  }
+}
+
+object DeviceManager {
+
+  def apply() = {
+    val adb = System.getenv("ANDROID_HOME") + "platform-tools/adb"
+    new DeviceManager(adb)
+  }
+}
+
+object implicits {
+  implicit def toRichFile(s: String): File = new File(s)
 }
 
 class something {
